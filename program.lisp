@@ -47,7 +47,7 @@
     E0 90 90 90 E0 ;D
     F0 80 F0 80 F0 ;E
     F0 80 F0 80 80)) ;F
-(setf *read-base* a)
+(setf *read-base* #xa)
 
 (defun setup-memory ()
   (let ((mem (make-array #x1000

@@ -1,6 +1,7 @@
 (require :sdl2)
 (require :mixalot)
 (require :mixalot-mp3)
+(require :uiop)
 (defpackage :cl-chip8
   (:use
    :cl

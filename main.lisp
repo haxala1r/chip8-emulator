@@ -117,3 +117,6 @@
 	(main-play (read-program filespec) *main-mixer* debug-mode)
       (error (c) (declare (ignore c)) (format t "An error?")))
     (mixalot:destroy-mixer *main-mixer*)))
+
+(defun start ()
+  (main (first (uiop:command-line-arguments))))
