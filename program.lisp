@@ -14,6 +14,9 @@
   screen
   ; Breakpoints
   (brks nil)
+  ; This is kind of special - This is updated every time a key is pressed, but
+  ; set back to nil after every instruction. Only used when FX0A is executed, 
+  ; since that instruction has to wait for a key press.
   last-pressed-key)
 
 (defun v (x program)
@@ -100,12 +103,34 @@
     :initarg :addr
     :reader addr)))
 
+(defmethod print-object ((object brk-cond) stream)
+  (print-unreadable-object (object stream :type t)
+    (format stream "Breakpoint at ~3,'0X was hit." (addr object))))
+
+(defparameter *enabled-quirks* nil)
+(defparameter *implemented-quirks*
+  (list :shift   ; Makes 8XY6 and 8XYE shift VX instead and completely ignore VY.
+	:clearvf ; Makes 8XY1 8XY2 and 8XY3 clear VF.
+	))
+
+(defun enable-quirk (q)
+  (unless (member q *enabled-quirks*)
+    (push q *enabled-quirks*)))
+
+(defun disable-quirk (q)
+  (if (member q *enabled-quirks*)
+      (delete q *enabled-quirks*)))
+
+(defun enabled-p (quirk)
+  "Checks if given quirk is currently enabled."
+  (member quirk *enabled-quirks*))
+
 ; Here are the full instruction handlers. It isn't the most elegant way, but
 ; I decided to organise instructions into functions determined by their most
 ; significant nibble, since that seems to be a good seperator for chip-8.
 
 (defmacro defins (num &body body)
-  "A small macro that defines an instruction handler function.
+  "A macro that defines an instruction handler function.
    This is only here because all instruction handlers require the same parameters and
    follow a common naming scheme.
    Also, MSB (most significant byte) and LSB (least significant byte) are defined
@@ -117,9 +142,6 @@
        ; these are here to prevent unused argument warnings
        p msb lsb
        ,@body)))
-
-; So far only cosmac chip8 mode is supported. SCHIP will be supported later on.
-(defparameter *emulator-mode* :chip8)
 
 ; 0 - Return and CLS are here.
 (defins 0
@@ -192,19 +214,19 @@
 		   (logior (v (ash lsb -4) p)
 			   (v (logand msb #xF) p)))
      ; 8XY1, 8XY2 and 8XY3 all clear VF when in chip8 mode.
-     (if (eql *emulator-mode* :chip8)
+     (if (enabled-p :clearvf)
 	 (set-register p #xF 0)))
     (#x2 ; 8XY2 : set VX to VX AND VY
      (set-register p (logand msb #xF)
 		   (logand (v (ash lsb -4) p)
 			   (v (logand msb #xF) p)))
-     (if (eql *emulator-mode* :chip8)
+     (if (enabled-p :clearvf)
 	 (set-register p #xF 0)))
     (#x3 ; 8XY3 : set VX to VX XOR VY
      (set-register p (logand msb #xF)
 		   (logxor (v (ash lsb -4) p)
 			   (v (logand msb #xF) p)))
-     (if (eql *emulator-mode* :chip8)
+     (if (enabled-p :clearvf)
 	 (set-register p #xF 0)))
     (#x4 ; 8XY4 : set VX to VX + VY (set carry bit accordingly)
      (let ((total (+ (v (ash lsb -4) p)
@@ -221,9 +243,12 @@
 	   (set-register p #xF 1))
        (set-register p (logand msb #xF) (mod res #x100))))
     (#x6 ; 8XY6 : shift VY right by one bit, set VX to result, store the shifted bit in VF
-     (let ((flag-val (logand (v (ash lsb -4) p) 1)))
-       (set-register p (logand msb #xF)
-		     (ash (v (ash lsb -4) p) -1))
+     ; If quirk set, shift VX instead of VY (VY gets completely ignored.)
+     (let* ((x (logand msb #xF))
+	    (y (ash lsb -4))
+	    (flag-val (logand (v (if (enabled-p :shift) x y) p) 1)))
+       (set-register p x
+		     (ash (v (if (enabled-p :shift) x y) p) -1))
        (set-register p #xF flag-val)))
     (#x7 ; 8XY7 : set VX to VY - VX, set VF to (NOT borrowed)
      (let ((res (- (v (ash lsb -4) p)
@@ -232,9 +257,12 @@
 		     (if (< res 0) 0 1))
        (set-register p (logand msb #xF) (mod res #x100))))
     (#xE ; 8XYE : shift VY left by one bit, set VX to result, store shifted bit in VF
-     (let ((flag-val (logand (v (ash lsb -4) p) #x80)))
-       (set-register p (logand msb #xF)
-		     (mod (ash (v (ash lsb -4) p) 1) #x100))
+     ; Shift VX instead if :shift quirk is enabled.
+     (let* ((x (logand msb #xF))
+	    (y (ash lsb -4))
+	    (flag-val (logand (v (if (enabled-p :shift) x y) p) #x80)))
+       (set-register p x
+		     (mod (ash (v (if (enabled-p :shift) x y) p) 1) #x100))
        (set-register p #xF (if (= flag-val 0) 0 1))))
     (t (error 'invalid-instruction
 	      :ins full-ins
@@ -284,7 +312,8 @@
 	  ; okay, so this whole mental gymnastics is happening because of a chip8 quirk.
 	  ; the quirk in question requires us to set VF to 1 if and only if we set a 1 pixel to 0.
 	  ; I'm sure there's a better way to do this, but screw that, this could've been just a single
-	  ; line if it weren't for that damn quirk.
+	  ; line if it weren't for that damn quirk. Also, this will need to be rewritten
+	  ; since the quirk needs to be toggleable. Also, we need to clip the damn sprite as well, and thats another quirk.
 	  (let ((tmp (aref scn y (+ x (- 7 j)))))
 	    (if (and (= 0
 			(xorf (aref scn y (+ x (- 7 j)))
@@ -388,7 +417,7 @@
       (#x3 (ins-3 p full-ins))
       (#x4 (ins-4 p full-ins))
       (#x5 (ins-5 p full-ins))
-      (#x6 (ins-6 p full-ins)) 
+      (#x6 (ins-6 p full-ins))
       (#x7 (ins-7 p full-ins))
       (#x8 (ins-8 p full-ins))
       (#x9 (ins-9 p full-ins))
@@ -410,5 +439,7 @@
       (run-instruction p dbg-mode))
     (invalid-instruction (err)
       (format t "Error: ~a~%At position: ~3,'0X ~%Instruction: ~4,'0X" (text err) (program-pc p) (ins err)))
-    (brk-cond ()
-      (format t "TODO BIYATCH!"))))
+    (brk-cond (c)
+      ; I'm still not quite sure if breakpoints are going to be a proper feature.
+      (format t "Breakpoint hit.")
+      (print c))))

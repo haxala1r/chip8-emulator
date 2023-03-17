@@ -96,6 +96,9 @@
 		 (run-instruction p debug-mode)
 	       (invalid-instruction (err)
 		 (print err)
+		 (sdl2:push-event :quit))
+	       (brk-cond (bp)
+		 (print bp)
 		 (sdl2:push-event :quit)))
 	     (setf (program-last-pressed-key p) nil)
 					; display screen. Maybe a good idea to not update the screen every instruction?
@@ -106,17 +109,19 @@
 
 
 (defun main (filespec &optional (debug-mode nil))
-  "Parses command line arguments and passes a program to main-play. (todo)"
+  "Sets up a new disposable environment, and runs given program in main-play."
   (mixalot:main-thread-init)
   (let ((*main-mixer* (mixalot:create-mixer))
 	(*key-states* *key-states*))
     (if (null *main-mixer*)
-	(error "Cannot create mixer.")
-	(print *main-mixer*))
+	(error "Cannot create mixer."))
     (handler-case 
 	(main-play (read-program filespec) *main-mixer* debug-mode)
-      (error (c) (declare (ignore c)) (format t "An error?")))
+      (t (c)
+	(format *standard-output* "An unexpected error occured.~%")
+	(print c)))
     (mixalot:destroy-mixer *main-mixer*)))
 
 (defun start ()
+  "Parses command line arguments, sets quirks etc. and calls main."
   (main (first (uiop:command-line-arguments))))
