@@ -125,6 +125,12 @@
   "Checks if given quirk is currently enabled."
   (member quirk *enabled-quirks*))
 
+(defun chip8-mode ()
+  "Enables/disables quirks to get the emulator in original chip8 mode."
+  (setf *enabled-quirks* nil)
+  (mapcar #'enable-quirk (list :clearvf))
+  nil)
+
 ; Here are the full instruction handlers. It isn't the most elegant way, but
 ; I decided to organise instructions into functions determined by their most
 ; significant nibble, since that seems to be a good seperator for chip-8.
@@ -185,6 +191,8 @@
 
 ; 5XY0 : compare VX to VY, skip next instruction if equal.
 (defins 5
+  (unless (= (logand lsb #xF) 0)
+    (error 'invalid-instruction :program p :ins full-ins))
   (if (= (v (logand msb #xF) p)
 	 (v (ash lsb -4) p))
       (inc-pc p))
@@ -396,7 +404,9 @@
 			   (+ n (program-i p)))))
      (incf (program-i p)
 	   (+ 1 (logand msb #xF)))
-     (inc-pc p))))
+     (inc-pc p))
+    (t (error 'invalid-instruction :program p :ins full-ins
+	      :text "Invalid instruction from the FXNN line."))))
 
 ; I put this stuff here because this function is essentially a
 ; huge table of instructions.

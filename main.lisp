@@ -4,7 +4,7 @@
 (defparameter *screen-width* 640)
 (defparameter *screen-height* 320)
 
-(defparameter *main-delay* 2
+(defparameter *main-delay* 1
   "The delay in main loop in number of milliseconds")
 
 ; This will be bound to a mixer when calling main-play
@@ -79,7 +79,7 @@
 	     (sdl2:set-render-draw-color rend 0 0 0 255)
 	     (sdl2:render-clear rend)
 					; Handle Delay and Sound timers.
-	     (when (= (mod total-time 8) 0)
+	     (when (= (mod total-time 16) 0)
 	       (cond-all
 		 ((> (program-dt p) 0) (decf (program-dt p)))
 		 ((> (program-st p) 0) (decf (program-st p))
