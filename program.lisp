@@ -111,6 +111,7 @@
 (defparameter *implemented-quirks*
   (list :shift   ; Makes 8XY6 and 8XYE shift VX instead and completely ignore VY.
 	:clearvf ; Makes 8XY1 8XY2 and 8XY3 clear VF.
+	:clipping
 	))
 
 (defun enable-quirk (q)
@@ -119,7 +120,7 @@
 
 (defun disable-quirk (q)
   (if (member q *enabled-quirks*)
-      (delete q *enabled-quirks*)))
+      (setf *enabled-quirks* (delete q *enabled-quirks*))))
 
 (defun enabled-p (quirk)
   "Checks if given quirk is currently enabled."
@@ -128,7 +129,7 @@
 (defun chip8-mode ()
   "Enables/disables quirks to get the emulator in original chip8 mode."
   (setf *enabled-quirks* nil)
-  (mapcar #'enable-quirk (list :clearvf))
+  (mapcar #'enable-quirk (list :clearvf :clipping))
   nil)
 
 ; Here are the full instruction handlers. It isn't the most elegant way, but
@@ -303,34 +304,32 @@
   (inc-pc p))
 
 (defmacro xorf (form1 form2)
-  "Sets form1 to form1 ^ form2 via setf."
-  `(setf ,form1 (logxor ,form1 ,form2)))
+  "Sets form1 to form1 ^ form2 via setf. Also returns t if form1 was flipped from 1 to 0 (nil otherwise), because that makes instruction DXYN simpler."
+  (let ((tmpsym (gensym)))
+    `(let ((,tmpsym (logand ,form1 ,form2)))
+       (setf ,form1 (logxor ,form1 ,form2))
+       ,tmpsym)))
 
-; DXYN - god... This is a MAJOR hack. I need to fix this.
-; Abondon all hope, ye who enter here!..
+; DXYN - Draw N bytes of sprite from address I at coordinates (Vx,Vy)
+; This is attempt #2 of trying to write this function properly.
+; attempt #1 didn't work properly, unfortunately.
+; It was also quite horrendous, actually.
+; TODO: chip8-test-suite tells me something is wrong here. I do not know what.
 (defins 13
-  (let ((x (mod (v (logand msb #xF) p) #x40))
-	(y (mod (v (ash lsb -4) p) #x20))
-	(i (program-i p))
+  (let ((x (v (logand msb #xF) p))
+	(y (v (ash lsb -4) p))
 	(n (logand lsb #xF))
-	(scn (program-screen p)))
-    (loop while (> n 0) do
-      (loop for j from 0 to 7 do
-	(unless (or (> (+ x (- 7 j)) #x3F) (> y #x1F))
-	  ; okay, so this whole mental gymnastics is happening because of a chip8 quirk.
-	  ; the quirk in question requires us to set VF to 1 if and only if we set a 1 pixel to 0.
-	  ; I'm sure there's a better way to do this, but screw that, this could've been just a single
-	  ; line if it weren't for that damn quirk. Also, this will need to be rewritten
-	  ; since the quirk needs to be toggleable. Also, we need to clip the damn sprite as well, and thats another quirk.
-	  (let ((tmp (aref scn y (+ x (- 7 j)))))
-	    (if (and (= 0
-			(xorf (aref scn y (+ x (- 7 j)))
-			      (logand (ash (aref (program-mem p) i) (- j)) 1)))
-		     (= tmp 1))
-		(set-register p #xF 1)))))
-      (decf n)
-      (incf i)
-      (incf y))
+	(flipped nil))
+    (loop for i from 0 to (- n 1)
+	  for byte = (aref (program-mem p) (+ (program-i p) i))
+	  do
+	     (loop for j from 0 to 7 do
+	       (unless (and (enabled-p :clipping) (or (> (+ x j) 63) (> (+ y i) 31)))
+		 (if (xorf (aref (program-screen p) (mod (+ y i) 32) (mod (+ x j) 64))
+			   (logand (ash byte (- (- 7 j))) 1))
+		     (setf flipped t)))))
+    (set-register p #xF (if flipped 1 0))
+    ;(if flipped (set-register p #xF 0))
     (inc-pc p)))
 
 ; E*** : TODO

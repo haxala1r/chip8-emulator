@@ -3,6 +3,13 @@
 
 (defparameter *screen-width* 640)
 (defparameter *screen-height* 320)
+(defparameter *screen-rects*
+  (let ((pw (/ *screen-width* 64))
+	(ph (/ *screen-height* 32)))
+    (loop for y from 0 to 31
+	  collect (loop for x from 0 to 63
+			collect (sdl2:make-rect (* x pw) (* y ph) pw ph))))
+  "The SDL2 uses FFI to interface with the underlying library, which means the sdl-rect objects don't ever get garbage collected. Creating these objects dynamically in a function would leak memory, so we're creating them once and then reusing them.")
 
 (defparameter *main-delay* 1
   "The delay in main loop in number of milliseconds")
@@ -39,15 +46,13 @@
 (defun display-program (rend screen)
   "Displays the given screen using the given sdl2 renderer.
    screen is expected to be a 32-by-64 array. 32 rows, 64 columns."
-  (let ((pw (/ *screen-width* 64))
-	(ph (/ *screen-height* 32)))
-    (loop for r from 0 to 31 do
-      (loop for c from 0 to 63 do
-	(if (= (aref screen r c) 1)
-	    (sdl2:set-render-draw-color rend 255 255 255 255)
-	    (sdl2:set-render-draw-color rend 0 0 0 255))
-	(sdl2:render-fill-rect rend
-			       (sdl2:make-rect (* pw c) (* ph r) pw ph))))))
+  (loop for r from 0 to 31 do
+    (loop for c from 0 to 63 do
+      (if (= (aref screen r c) 1)
+	  (sdl2:set-render-draw-color rend 255 255 255 255)
+	  (sdl2:set-render-draw-color rend 0 0 0 255))
+      (sdl2:render-fill-rect rend
+			     (nth c (nth r *screen-rects*))))))
 
 ; you must first read-program and pass that to main-play.
 (defun main-play (p mixer &optional (debug-mode nil))
@@ -79,7 +84,7 @@
 	     (sdl2:set-render-draw-color rend 0 0 0 255)
 	     (sdl2:render-clear rend)
 					; Handle Delay and Sound timers.
-	     (when (= (mod total-time 16) 0)
+	     (when (= (mod total-time 4) 0)
 	       (cond-all
 		 ((> (program-dt p) 0) (decf (program-dt p)))
 		 ((> (program-st p) 0) (decf (program-st p))
